@@ -7,6 +7,8 @@ A tool that sets a honeypot port and runs a command against every IP that connec
 Must be ran as root due to raw packets
 ```
 portanoia -p 1337 -c "iptables -A INPUT -s [SRC_IP] -j DROP"
+# OR
+portanoia -p 1337 -c "iptables -A INPUT -s [SRC_IP] -j DROP && echo connection attempt from [SRC_IP] blocking | espeak"
 ```
 
 # Install from Source
@@ -20,4 +22,5 @@ why would you want to download an unknown binary from github and run it as root?
 
 # Ideas
 This was fun but using espeak and portanoia to trigger when connected to.  This results in an alert being spoken over the default audio device.
+
 ![Espeak with portanoia in action](https://raw.githubusercontent.com/0x4445565A/portanoia/master/_portanoia.png)
