@@ -17,3 +17,7 @@ go install github.com/0x4445565a/portanoia
 
 # Downloading binary
 why would you want to download an unknown binary from github and run it as root?
+
+# Ideas
+This was fun but using espeak and portanoia to trigger when connected to.  This results in an alert being spoken over the default audio device.
+![Espeak with portanoia in action](https://raw.githubusercontent.com/0x4445565A/portanoia/master/portanoia.png)
