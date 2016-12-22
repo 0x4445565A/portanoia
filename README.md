@@ -2,6 +2,7 @@
 A tool that sets a honeypot port and runs a command against every IP that connects to it.
 
 **Note:** I seriously doubt this code is efficient enough to be used on production, but it works great when you are at cons and don't want to be bothered by nosy attendees
+**UPDATE:** I was thinking about it and I think by using concurrency via goroutines this could actually be used on productions since the response command wont hang the initial program.  Also playing with ways on how to make the TCP listener better by dropping inbound requests.
 
 # Usage
 Must be ran as root due to raw packets
