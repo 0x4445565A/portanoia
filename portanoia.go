@@ -157,22 +157,26 @@ func captureTraffic() {
 
 		// If someone that isn't us triggers our port
 		if p.dest_port == listen_port && !p.sameSrc() {
-			// Replace tokens with proper values, preserve original command
-			cmd := replaceTokens(p)
-
 			// Output connection and command info
 			red("Connection: ")
-			fmt.Println(p.ipToString(SRC), "@", p.dest_ip, ":", p.dest_port)
-			bold("Executing: ")
-			fmt.Println(cmd)
-
-			// Execute the command
-			_, err := exec.Command("sh", "-c", cmd).Output()
-			if err != nil {
-				fmt.Println("Error Executing command:", err.Error())
-				os.Exit(1)
-			}
+			fmt.Println(p.ipToString(SRC), "@", p.ipToString(DEST), ":", p.dest_port)
+			// Fork this out so we move faster than the given command
+			go executeCommand(p)
 		}
+	}
+}
+
+func executeCommand(p Packet) {
+	// Replace tokens with proper values, preserve original command
+	cmd := replaceTokens(p)
+	// Display command information
+	bold("Executing: ")
+	fmt.Println(cmd)
+	// Execute the command
+	_, err := exec.Command("sh", "-c", cmd).Output()
+	if err != nil {
+		red("Error Executing command: ")
+		fmt.Println(err.Error())
 	}
 }
 
