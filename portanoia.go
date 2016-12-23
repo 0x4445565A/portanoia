@@ -109,7 +109,7 @@ func main() {
 
 	// Open the port given from the args
 	l := openPort()
-	go dropPortConnections(&l)
+	go dropPortConnections(l)
 	defer l.Close()
 
 	// Capture the traffic to host and run command on all connections
