@@ -5,6 +5,9 @@
  * Desc: A honeyport to catch rascals
  * Usage: go build portanoia.go && sudo ./portanoia -p 1337
  */
+
+// +build linux
+
 package main
 
 import (
@@ -123,7 +126,7 @@ func createFlags() {
 	flag.IntVar(&listen_port, "p", 1337, "port to listen on for honey pot")
 	flag.StringVar(&command, "c", "echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out", "command to use when the port is triggered")
 	flag.BoolVar(&viewToken, "t", false, "if used the program will output avaible tokens for the -c flag")
-	flag.BoolVar(&viewToken, "q", false, "if used the program will not have any stdin output for performance")
+	flag.BoolVar(&quietMode, "q", false, "if used the program will not have any stdin output for performance")
 	flag.Parse()
 }
 
@@ -237,19 +240,25 @@ func replaceTokens(p Packet) string {
  * Output tokens and examples.
  */
 func viewTokens() {
-	output("Below are the availble tokens\n", "", "")
+	output("", "Below are the availble tokens\n", "")
 	tokens := createTokens(Packet{})
 	for k, _ := range tokens {
 		fmt.Println(k)
 	}
-	output("\n\nBlocking via IPTables\n", "", "")
+	output("", "\n\nBlocking via IPTables\n", "")
 	output("", "", "iptables -A INPUT -s [SRC_IP] -j DROP\n")
-	output("Logging to file\n", "", "")
+	output("", "Logging to file\n", "")
 	output("", "", "echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out.txt\n")
 	os.Exit(0)
 }
 
+/**
+ * Custom output for warnings and normal output.
+ */
 func output(r string, b string, s string, a ...interface{}) {
+	if quietMode {
+		return
+	}
 	red(r)
 	bold(b)
 	fmt.Printf(s, a...)
