@@ -7,6 +7,8 @@ A tool that sets a honeypot port and runs a command against every IP that connec
 
 **UPDATE 2:** By handling TCP connections and the act of immediately dropping them immediately (Well after a full connection, might write own TCP listen for a little more speed) in another Goroutine I think this could scale even better, I'm wondering how well this would do again thousands of concurrent connections.
 
+**UPDATE 3:** Tested with some bechtesting software and ran into issues with max file descriptors.  Added a semaphore to keep file descriptors down and reasonable.  This thread lock is set as a constant @ 50.  This is shared between the TCP listener and command executor.
+
 # Usage
 Must be ran as root due to raw packets
 ```
