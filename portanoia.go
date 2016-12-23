@@ -5,9 +5,6 @@
  * Desc: A honeyport to catch rascals
  * Usage: go build portanoia.go && sudo ./portanoia -p 1337
  */
-
-// +build linux
-
 package main
 
 import (
@@ -145,11 +142,10 @@ func openPort() net.Listener {
 /**
  * Upon connection drop connection.
  */
-func dropPortConnections(l *net.Listener) {
-	ln := *l
+func dropPortConnections(l net.Listener) {
 	for {
 		<-semLock
-		conn, err := ln.Accept()
+		conn, err := l.Accept()
 		if err != nil {
 			output("Error With Connection: ", "", err.Error())
 		}
