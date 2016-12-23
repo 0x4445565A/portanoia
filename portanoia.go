@@ -33,9 +33,12 @@ var (
 	listen_port int
 	command     string
 	viewToken   bool
+	semLock     chan bool
 	red         func(string, ...interface{})
 	bold        func(string, ...interface{})
 )
+
+const threadSaftey = 50
 
 // Packet structure for processing IPv4 packets
 type Packet struct {
@@ -81,6 +84,12 @@ func (p *Packet) sameSrc() bool {
 }
 
 func main() {
+	// Set up the thread safety lock
+	semLock = make(chan bool, threadSaftey)
+	for i := 0; i < threadSaftey; i++ {
+		semLock <- true
+	}
+
 	// Initialize Colors
 	red = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
 	bold = color.New(color.FgWhite).Add(color.Bold).PrintfFunc()
@@ -136,12 +145,14 @@ func openPort() net.Listener {
 func dropPortConnections(l *net.Listener) {
 	ln := *l
 	for {
+		<-semLock
 		conn, err := ln.Accept()
 		if err != nil {
 			red("Error With Connection: ")
 			fmt.Println(err.Error())
 		}
 		conn.Close()
+		semLock <- true
 	}
 }
 
@@ -177,7 +188,11 @@ func captureTraffic() {
 			red("Connection: ")
 			fmt.Println(p.ipToString(SRC), "@", p.ipToString(DEST), ":", p.dest_port)
 			// Fork this out so we move faster than the given command
-			go executeCommand(p)
+			go func(p Packet) {
+				<-semLock
+				executeCommand(p)
+				semLock <- true
+			}(p)
 		}
 	}
 }
