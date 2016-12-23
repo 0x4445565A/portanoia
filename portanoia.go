@@ -33,6 +33,7 @@ var (
 	listen_port int
 	command     string
 	viewToken   bool
+	quietMode   bool
 	semLock     chan bool
 	red         func(string, ...interface{})
 	bold        func(string, ...interface{})
@@ -103,10 +104,8 @@ func main() {
 	}
 
 	// Simple banner
-	bold("Port: ")
-	fmt.Printf("%d\n", listen_port)
-	bold("Command: ")
-	fmt.Printf("%s\n", command)
+	output("", "Port: ", "%d\n", listen_port)
+	output("", "Command: ", "%s\n", command)
 
 	// Open the port given from the args
 	l := openPort()
@@ -124,6 +123,7 @@ func createFlags() {
 	flag.IntVar(&listen_port, "p", 1337, "port to listen on for honey pot")
 	flag.StringVar(&command, "c", "echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out", "command to use when the port is triggered")
 	flag.BoolVar(&viewToken, "t", false, "if used the program will output avaible tokens for the -c flag")
+	flag.BoolVar(&viewToken, "q", false, "if used the program will not have any stdin output for performance")
 	flag.Parse()
 }
 
@@ -133,7 +133,7 @@ func createFlags() {
 func openPort() net.Listener {
 	l, err := net.Listen("tcp", ":"+strconv.Itoa(listen_port))
 	if err != nil {
-		fmt.Println("Error listening:", err.Error())
+		output("Error listening: ", "", err.Error())
 		os.Exit(1)
 	}
 	return l
@@ -148,8 +148,7 @@ func dropPortConnections(l *net.Listener) {
 		<-semLock
 		conn, err := ln.Accept()
 		if err != nil {
-			red("Error With Connection: ")
-			fmt.Println(err.Error())
+			output("Error With Connection: ", "", err.Error())
 		}
 		conn.Close()
 		semLock <- true
@@ -185,8 +184,8 @@ func captureTraffic() {
 		// If someone that isn't us triggers our port
 		if p.dest_port == listen_port { //&& !p.sameSrc() {
 			// Output connection and command info
-			red("Connection: ")
-			fmt.Println(p.ipToString(SRC), "@", p.ipToString(DEST), ":", p.dest_port)
+			output("Connection: ", "", "%s@%s:%d\n", p.ipToString(SRC), p.ipToString(DEST), p.dest_port)
+
 			// Fork this out so we move faster than the given command
 			go func(p Packet) {
 				<-semLock
@@ -201,13 +200,11 @@ func executeCommand(p Packet) {
 	// Replace tokens with proper values, preserve original command
 	cmd := replaceTokens(p)
 	// Display command information
-	bold("Executing: ")
-	fmt.Println(cmd)
+	output("", "Executing: ", cmd+"\n")
 	// Execute the command
 	_, err := exec.Command("sh", "-c", cmd).Output()
 	if err != nil {
-		red("Error Executing command: ")
-		fmt.Println(err.Error())
+		output("Error Executing command: ", "", err.Error())
 	}
 }
 
@@ -240,14 +237,20 @@ func replaceTokens(p Packet) string {
  * Output tokens and examples.
  */
 func viewTokens() {
-	bold("Below are the availble tokens\n")
+	output("Below are the availble tokens\n", "", "")
 	tokens := createTokens(Packet{})
 	for k, _ := range tokens {
 		fmt.Println(k)
 	}
-	bold("\n\nBlocking via IPTables\n")
-	fmt.Printf("iptables -A INPUT -s [SRC_IP] -j DROP\n")
-	bold("Logging to file\n")
-	fmt.Printf("echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out.txt\n")
+	output("\n\nBlocking via IPTables\n", "", "")
+	output("", "", "iptables -A INPUT -s [SRC_IP] -j DROP\n")
+	output("Logging to file\n", "", "")
+	output("", "", "echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out.txt\n")
 	os.Exit(0)
+}
+
+func output(r string, b string, s string, a ...interface{}) {
+	red(r)
+	bold(b)
+	fmt.Printf(s, a...)
 }
