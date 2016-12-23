@@ -101,6 +101,7 @@ func main() {
 
 	// Open the port given from the args
 	l := openPort()
+	go dropPortConnections(&l)
 	defer l.Close()
 
 	// Capture the traffic to host and run command on all connections
@@ -130,6 +131,21 @@ func openPort() net.Listener {
 }
 
 /**
+ * Upon connection drop connection.
+ */
+func dropPortConnections(l *net.Listener) {
+	ln := *l
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			red("Error With Connection: ")
+			fmt.Println(err.Error())
+		}
+		conn.Close()
+	}
+}
+
+/**
  * Listen to traffic and execute command against offending IP addresses
  */
 func captureTraffic() {
@@ -156,7 +172,7 @@ func captureTraffic() {
 		}
 
 		// If someone that isn't us triggers our port
-		if p.dest_port == listen_port && !p.sameSrc() {
+		if p.dest_port == listen_port { //&& !p.sameSrc() {
 			// Output connection and command info
 			red("Connection: ")
 			fmt.Println(p.ipToString(SRC), "@", p.ipToString(DEST), ":", p.dest_port)
