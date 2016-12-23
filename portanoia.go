@@ -182,7 +182,7 @@ func captureTraffic() {
 		}
 
 		// If someone that isn't us triggers our port
-		if p.dest_port == listen_port { //&& !p.sameSrc() {
+		if p.dest_port == listen_port && !p.sameSrc() {
 			// Output connection and command info
 			output("Connection: ", "", "%s@%s:%d\n", p.ipToString(SRC), p.ipToString(DEST), p.dest_port)
 
