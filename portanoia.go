@@ -1,26 +1,22 @@
-/**
- * File: portanoia.go
- * Name: Brandon Martinez
- * Date: Dec 16th, 2016
- * Desc: A honeyport to catch rascals
- * Usage: go build portanoia.go && sudo ./portanoia -p 1337
- */
 package main
 
 import (
 	"bytes"
 	"encoding/binary"
 	"flag"
-	"fmt"
+	"log"
 	"net"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 
-	"github.com/fatih/color"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/pcap"
 )
+
+var portPtr *int64
+var devPtr *string
+var commandPtr *string
 
 // Ease of use constants
 const (
@@ -28,113 +24,57 @@ const (
 	SRC  = "SRC"
 )
 
-// Set up some globals
-var (
-	listen_port int
-	command     string
-	viewToken   bool
-	quietMode   bool
-	semLock     chan bool
-	red         func(string, ...interface{})
-	bold        func(string, ...interface{})
-)
+func init() {
+	portPtr = flag.Int64("port", 1337, "Port to listen with honey pot")
+	devPtr = flag.String("dev", "en0", "Device to watch for packet")
+	commandPtr = flag.String("cmd", "echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out", "Command to execute when a connection is found")
+	listDevPtr := flag.Bool("list-dev", false, "List all the devices then exit")
 
-const threadSaftey = 50
+	flag.Parse()
 
-// Packet structure for processing IPv4 packets
-type Packet struct {
-	src_ip    []byte
-	dest_ip   []byte
-	dest_port int
-	src_port  int
-}
-
-// Ease of use function for bytes.Equal, lovely function
-func (p *Packet) compareIP(packet_ip string, cmp_ip []byte) bool {
-	switch packet_ip {
-	case DEST:
-		return bytes.Equal(p.dest_ip, cmp_ip)
-	case SRC:
-		return bytes.Equal(p.src_ip, cmp_ip)
-	default:
-		return false
+	if *listDevPtr {
+		devs, err := pcap.FindAllDevs()
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, dev := range devs {
+			log.Printf("%s: %v", dev.Name, dev.Addresses)
+		}
 	}
-}
-
-// Convert []byte to a string of an IP address
-func (p *Packet) ipToString(packet_ip string) string {
-	var b []byte
-	switch packet_ip {
-	case DEST:
-		b = p.dest_ip
-	case SRC:
-		b = p.src_ip
-	default:
-		b = p.src_ip
-	}
-	// Just incase the packet doesn't have an IP address
-	if len(b) != 4 {
-		return "127.0.0.1"
-	}
-	return strconv.Itoa(int(b[0])) + "." + strconv.Itoa(int(b[1])) + "." + strconv.Itoa(int(b[2])) + "." + strconv.Itoa(int(b[3]))
-}
-
-// Ease of use function for bytes.Equal
-func (p *Packet) sameSrc() bool {
-	return bytes.Equal(p.dest_ip, p.src_ip)
 }
 
 func main() {
-	// Set up the thread safety lock
-	semLock = make(chan bool, threadSaftey)
-	for i := 0; i < threadSaftey; i++ {
-		semLock <- true
+	threads := 50
+	ch := make(chan struct{}, threads)
+	for i := 0; i < threads; i++ {
+		ch <- struct{}{}
 	}
 
-	// Initialize Colors
-	red = color.New(color.FgRed).Add(color.Bold).PrintfFunc()
-	bold = color.New(color.FgWhite).Add(color.Bold).PrintfFunc()
+	honeyPotDeviceAtPort(ch, *devPtr, *portPtr)
+}
 
-	// Create the argument flags
-	createFlags()
-
-	// If argument to view tokens is set show tokens/examples and exit
-	if viewToken {
-		viewTokens()
-	}
-
-	// Simple banner
-	output("", "Port: ", "%d\n", listen_port)
-	output("", "Command: ", "%s\n", command)
-
-	// Open the port given from the args
-	l := openPort()
+func honeyPotDeviceAtPort(ch chan struct{}, dev string, port int64) {
+	l := openPort(port)
 	go dropPortConnections(l)
 	defer l.Close()
 
-	// Capture the traffic to host and run command on all connections
-	captureTraffic()
+	if handle, err := pcap.OpenLive(dev, 1024, true, pcap.BlockForever); err != nil {
+		log.Fatal(err)
+	} else if err := handle.SetBPFFilter("port " + strconv.FormatInt(port, 10)); err != nil { // optional
+		log.Fatal(err)
+	} else {
+		packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+		for packet := range packetSource.Packets() {
+			<-ch
+			go handlePacket(ch, packet)
+		}
+	}
 }
 
-/**
- * Create the argument flags and place them in the appropriate globals
- */
-func createFlags() {
-	flag.IntVar(&listen_port, "p", 1337, "port to listen on for honey pot")
-	flag.StringVar(&command, "c", "echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out", "command to use when the port is triggered")
-	flag.BoolVar(&viewToken, "t", false, "if used the program will output avaible tokens for the -c flag")
-	flag.BoolVar(&quietMode, "q", false, "if used the program will not have any stdin output for performance")
-	flag.Parse()
-}
-
-/**
- * Open a port based on the global listen_port
- */
-func openPort() net.Listener {
-	l, err := net.Listen("tcp", ":"+strconv.Itoa(listen_port))
+func openPort(port int64) net.Listener {
+	l, err := net.Listen("tcp", ":"+strconv.FormatInt(port, 10))
 	if err != nil {
-		output("Error listening: ", "", err.Error())
-		os.Exit(1)
+		log.Fatal(err)
 	}
 	return l
 }
@@ -144,118 +84,111 @@ func openPort() net.Listener {
  */
 func dropPortConnections(l net.Listener) {
 	for {
-		<-semLock
 		conn, err := l.Accept()
 		if err != nil {
-			output("Error With Connection: ", "", err.Error())
+			log.Print(err)
 		}
 		conn.Close()
-		semLock <- true
 	}
 }
 
-/**
- * Listen to traffic and execute command against offending IP addresses
- */
-func captureTraffic() {
-	// Create a raw socket and filter against tcp
-	// TODO: get a simple way of detecting UDP and TCP since syscall.IPPROTO_TCP | syscall.IPPROTO_UDP doesn't work
-	fd, _ := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_TCP)
-	f := os.NewFile(uintptr(fd), fmt.Sprintf("fd %d", fd))
+func handlePacket(ch chan struct{}, packet gopacket.Packet) {
+	defer func() { ch <- struct{}{} }()
 
-	for {
-		// Create buffer for the packet
-		buf := make([]byte, 1024)
-		_, err := f.Read(buf)
-		if err != nil {
-			fmt.Println(err.Error())
-			os.Exit(1)
-		}
-
-		// Construct the packet based off of the IPv4 standard
-		p := Packet{
-			buf[12:16],
-			buf[16:20],
-			int(binary.BigEndian.Uint16(buf[22:24])),
-			int(binary.BigEndian.Uint16(buf[24:26])),
-		}
-
-		// If someone that isn't us triggers our port
-		if p.dest_port == listen_port && !p.sameSrc() {
-			// Output connection and command info
-			output("Connection: ", "", "%s@%s:%d\n", p.ipToString(SRC), p.ipToString(DEST), p.dest_port)
-
-			// Fork this out so we move faster than the given command
-			go func(p Packet) {
-				<-semLock
-				executeCommand(p)
-				semLock <- true
-			}(p)
-		}
+	p := newPacketFromPacket(packet)
+	if p.SameSourceDestIP() {
+		return
 	}
+	executeCommand(p)
 }
 
-func executeCommand(p Packet) {
-	// Replace tokens with proper values, preserve original command
-	cmd := replaceTokens(p)
-	// Display command information
-	output("", "Executing: ", cmd+"\n")
-	// Execute the command
-	_, err := exec.Command("sh", "-c", cmd).Output()
-	if err != nil {
-		output("Error Executing command: ", "", err.Error())
-	}
+type packet struct {
+	DestIP   []byte
+	SrcIP    []byte
+	DestPort int
+	SrcPort  int
 }
 
-/**
- * Create map of tokens and their replacements based on Packet{}
- */
-func createTokens(p Packet) map[string]string {
+func (p *packet) SameSourceDestIP() bool {
+	return bytes.Equal(p.DestIP, p.SrcIP)
+}
+
+func (p *packet) DecBytesToString(foo string) string {
+	var b []byte
+	switch foo {
+	case DEST:
+		b = p.DestIP
+	case SRC:
+		b = p.SrcIP
+	}
+	// Just a catchall, this shouldn't happen.
+	if len(b) != 4 {
+		return "127.0.0.1"
+	}
+	return strconv.FormatInt(int64(b[0]), 10) + "." + strconv.FormatInt(int64(b[1]), 10) + "." + strconv.FormatInt(int64(b[2]), 10) + "." + strconv.FormatInt(int64(b[3]), 10)
+}
+
+func newPacketFromPacket(packetSource gopacket.Packet) *packet {
+	var networkLayerBuf []byte
+	var buf []byte
+	p := &packet{}
+	layers := packetSource.Layers()
+
+	// Network Layer is layer #2(index 1).
+	networkLayer := layers[1]
+	if networkLayer != nil {
+		networkLayerBuf = networkLayer.LayerContents()
+	}
+
+	// Transport Layer is layer #3(index 2) but if we receive a fragment packet attack the transport interface isn't used.
+	transportLayer := layers[2]
+	if transportLayer != nil {
+		buf = transportLayer.LayerContents()
+	}
+
+	if len(networkLayerBuf) >= 20 {
+		p.DestIP = networkLayerBuf[12:16]
+		p.SrcIP = networkLayerBuf[16:20]
+	}
+
+	if len(buf) >= 4 {
+		p.DestPort = int(binary.BigEndian.Uint16(buf[2:4]))
+		p.SrcPort = int(binary.BigEndian.Uint16(buf[0:2]))
+	}
+
+	return p
+}
+
+func createTokens(p *packet) map[string]string {
 	return map[string]string{
-		"[DEST_IP]":     p.ipToString(DEST),
-		"[SRC_IP]":      p.ipToString(SRC),
-		"[DEST_PORT]":   strconv.Itoa(p.dest_port),
-		"[SRC_PORT]":    strconv.Itoa(p.src_port),
-		"[LISTEN_PORT]": strconv.Itoa(listen_port),
+		"[DEST_IP]":     p.DecBytesToString(DEST),
+		"[SRC_IP]":      p.DecBytesToString(SRC),
+		"[DEST_PORT]":   strconv.Itoa(p.DestPort),
+		"[SRC_PORT]":    strconv.Itoa(p.DestPort),
+		"[LISTEN_PORT]": strconv.FormatInt(int64(*portPtr), 10),
 	}
 }
 
 /**
  * Replace tokens in command with proper values.
  */
-func replaceTokens(p Packet) string {
+func replaceTokens(p *packet) string {
 	tokens := createTokens(p)
-	cmd := command
+	cmd := *commandPtr
 	for k, v := range tokens {
 		cmd = strings.Replace(cmd, k, v, -1)
 	}
 	return cmd
 }
 
-/**
- * Output tokens and examples.
- */
-func viewTokens() {
-	output("", "Below are the availble tokens\n", "")
-	tokens := createTokens(Packet{})
-	for k, _ := range tokens {
-		fmt.Println(k)
+func executeCommand(p *packet) {
+	// Replace tokens with proper values, preserve original command
+	cmd := replaceTokens(p)
+	// Display command information
+	log.Printf("EXECUTING: %s", cmd)
+	// Execute the command
+	_, err := exec.Command("sh", "-c", cmd).Output()
+	if err != nil {
+		log.Printf("ERROR EXECUTING: %s", err.Error())
 	}
-	output("", "\n\nBlocking via IPTables\n", "")
-	output("", "", "iptables -A INPUT -s [SRC_IP] -j DROP\n")
-	output("", "Logging to file\n", "")
-	output("", "", "echo [SRC_IP] connected to [DEST_IP]:[DEST_PORT] >> out.txt\n")
-	os.Exit(0)
-}
-
-/**
- * Custom output for warnings and normal output.
- */
-func output(r string, b string, s string, a ...interface{}) {
-	if quietMode {
-		return
-	}
-	red(r)
-	bold(b)
-	fmt.Printf(s, a...)
 }
